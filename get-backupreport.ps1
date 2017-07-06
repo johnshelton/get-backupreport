@@ -1,5 +1,5 @@
-#Requires -RunAsAdministrator
-#Requires -Modules PowershellGet
+# #Requires -RunAsAdministrator
+# Requires -Modules PowershellGet
 <#
 =======================================================================================
 File Name: get-netapprpt.ps1
@@ -39,7 +39,6 @@ $ExecutionLog = "Script was run on $ExecutionHost by $ExecutionUser on $Executio
 #
 # Define Output Variables
 #
-$ExecutionStamp = Get-Date -Format yyyyMMdd_HH-mm-ss
 $path = "http://rdc-shelly-01.wfm.wegmans.com/backupreports/"
 $ArchivePath = "archive\"
 $FileExt = '.html'
@@ -62,8 +61,10 @@ IF($ArchivePathExists -eq $False)
   }
 $SearchIconPath = $path + "css\searchicon.png"
 $BackupReportOutputPath = $HTMLFileOutputPath + "index" + $FileExt
-[Hashtable]$VCenterAppServerPath = @{ "RDC-VMVC-01" = "\\rdc-vmvc-app-01\c`$\Program Files\NetApp\Virtual Storage Console\smvi\server\repository\scheduledBackups.xml"; "BDC-VMVC-01" = "\\bdc-vmvc-app-01\c`$\Program Files\NetApp\Virtual Storage Console\smvi\server\repository\scheduledBackups.xml"}
+[Hashtable]$VCenterAppServerPath = @{ "RDC-VMVC-01" = "\\rdc-vmvc-vsc-01\c`$\Program Files\NetApp\Virtual Storage Console\smvi\server\repository\#scheduledBackups.xml"; "BDC-VMVC-01" = "\\bdc-vmvc-app-01\c`$\Program Files\NetApp\Virtual Storage Console\smvi\server\repository\#scheduledBackups.xml"}
 [Hashtable]$ReportNames = @{"RPT_BACKUPJOBDETAIL" = "NetApp Backup Job Detail"; "RPT_VMBACKUPJOBDETAIL" = "Backups by VM"; "RPT_VMSNAPMIRRORBACKUPJOBDETAIL" = "SnapMirror Backups by VM"; "RPT_VMSWITHNOBACKUPS" = "VMs with no backups found"; "RPT_VMWAREDATASTOREBACKUPJOBS" = "Backup Jobs by Datastore"; "RPT_VMWAREDATASTORESNAPMIRRORJOBS" = "SnapMirror Jobs by Datastore"; "RPT_VMWAREDATASTORENOJOBS" = "Datastores with NO Backup or SnapMirror Jobs"}
+[Hashtable]$VCenterAppServerPathBackups = @{ "RDC-VMVC-01" = "\\rdc-vmvc-vsc-01\c`$\Program Files\NetApp\Virtual Storage Console\smvi\server\repository\#Backups.xml"; "BDC-VMVC-01" = "\\bdc-vmvc-app-01\c`$\Program Files\NetApp\Virtual Storage Console\smvi\server\repository\#Backups.xml"}
+$TempBackupsXMLLocation = "c:\temp\temp_backups.xml"
 #
 # Clear Variables
 #
@@ -99,22 +100,28 @@ ForEach($VCenter in $VCenters){
   $XMLPath = $VCenterAppServerPath.Item($VCenter)
   $TempXML = @()
   [XML]$TempXML = Get-Content -Path $XMLPath | select -Skip 1
+  $BackupStatusXMLPath = $VCenterAppServerPathBackups.Item($VCenter)
+  Copy-Item -Path $BackupStatusXMLPath -Destination $TempBackupsXMLLocation -Force
+  [XML]$BackupStatusXML = Get-Content -Path $TempBackupsXMLLocation | select -Skip 1
   $VMWareDatastores += Get-Datastore -Server $VCenter
   ForEach ($BackupJob in $TempXML.root.backupJob) {
     ForEach ($TempBackupDatastore in $BackupJob.entities.entity){
       $TempDatastore = New-Object psobject
       $TempDatastore | Add-Member -MemberType NoteProperty -Name "JobName" -Value $BackupJob.jobname
+      $TempDatastore | Add-Member -MemberType NoteProperty -Name "JobID" -Value $BackupJob.jobId
       $TempDatastore | Add-Member -MemberType NoteProperty -Name "DatastoreName" -Value $TempBackupDatastore.name
       $TempDatastore | Add-Member -MemberType NoteProperty -Name "UUID" -Value $TempBackupDatastore.UUID
       $BackupJobDatastoreInfo += $TempDatastore
     }
     $TempBackupJobDetail = New-Object PSObject
     $TempBackupJobDetail | Add-Member -MemberType NoteProperty -Name "JobName" -Value $BackupJob.jobname
+    $TempBackupJobDetail | Add-Member -MemberType NoteProperty -Name "JobID" -Value $BackupJob.jobId
     $TempBackupJobDetail | Add-Member -MemberType NoteProperty -Name "DailyScheduleHour" -Value $BackupJob.DailySchedule.startHour
     $TempBackupJobDetail | Add-Member -MemberType NoteProperty -Name "DailyScheduleMin" -Value $BackupJob.DailySchedule.startMinute
     $TempBackupJobDetail | Add-Member -MemberType NoteProperty -Name "HourlyScheduleHour" -Value $BackupJob.HourlySchedule.startHour
     $TempBackupJobDetail | Add-Member -MemberType NoteProperty -Name "HourlyScheduleMin" -Value $BackupJob.HourlySchedule.startMinute
-    $TempBackupJobDetail | Add-Member -MemberType NoteProperty -Name "Retention" -Value $BackupJob.retention.count
+    $TempBackupJobDetail | Add-Member -MemberType NoteProperty -Name "Retention Count" -Value $BackupJob.retention.count
+    $TempBackupJobDetail | Add-Member -MemberType NoteProperty -Name "Retention Type" -Value $BackupJob.retention.type
     $TempBackupJobDetail | Add-Member -MemberType NoteProperty -Name "NotificationEmailAddress" -Value $BackupJob.notification.addresses.address
     $TempBackupJobDetail | Add-Member -MemberType NoteProperty -Name "NotificationType" -Value $BackupJob.Notification.type
     $TempBackupJobDetail | Add-Member -MemberType NoteProperty -Name "No_SnapshotVMs" -Value $BackupJob.noVmSnaps
@@ -138,7 +145,7 @@ ForEach($VCenter in $VCenters){
     $TempDatastoreCount = $VMDatastores.count
     # Write-Host "$VM has the following datastores $VmDatastores"
     ForEach ($VMDatastore in $VMDatastores){
-      $VMNetAppBackupJobs += $BackupJobDatastoreInfo | Where-Object {($_.DatastoreName -eq $VMDatastore.Name)} | Select JobName
+      $VMNetAppBackupJobs += $BackupJobDatastoreInfo | Where-Object {($_.DatastoreName -eq $VMDatastore.Name)}
       # Write-Host $VMNetAppBackupJobs
     }
     IF(!($VMNetAppBackupJobs)){
@@ -156,7 +163,10 @@ ForEach($VCenter in $VCenters){
       # Write-Host "$VM has a backup job"
       ForEach ($VMNetAppBackupJob in $VMNetAppBackupJobs){
         $VMNetAppBackupJobDetail = ""
-        $VMNetAppBackupJobDetail = $BackupJobDetail | Where-Object {($_.JobName -eq $VMNetAppBackupJob.JobName)} | Select JobName, DailyScheduleHour, DailyScheduleMin, HourlyScheduleHour, HourlyScheduleMin, Retention, SnapMirror, JobStatus
+        # $VMNetAppBackupJobDetail = $BackupJobDetail | Where-Object {($_.JobName -eq $VMNetAppBackupJob.JobName)} | Select JobName, DailyScheduleHour, DailyScheduleMin, HourlyScheduleHour, HourlyScheduleMin, Retention, SnapMirror, JobStatus
+        $VMNetAppBackupJobDetail = $BackupJobDetail | Where-Object {($_.JobName -eq $VMNetAppBackupJob.JobName)}
+        $JobStatus = @()
+        $JobStatus = $BackupStatusXML.root.backup | Where-Object {$_.backupJobID -eq $VMNetAppBackupJob.JobID} | Sort-Object name -Descending
         # Write-Host "$VM is backed up by $VMNetAppBackupJobDetail.JobName"
         # IF(($VMNetAppBackupJobDetail)){
           IF($VMNetAppBackupJobDetail.SnapMirror -eq "true" -or $VMNetAppBackupJobDetail.SnapMirror -eq $true){
@@ -171,6 +181,12 @@ ForEach($VCenter in $VCenters){
             $TempVMDetail | Add-Member -MemberType NoteProperty -Name "VM_BackupJobHourlyScheduleMin" -Value $VMNetAppBackupJobDetail.HourlyScheduleMin
             $TempVMDetail | Add-Member -MemberType NoteProperty -Name "VM_BackupJobRetention" -Value $VMNetAppBackupJobDetail.Retention
             $TempVMDetail | Add-Member -MemberType NoteProperty -Name "VM_BackupJobState" -Value $VMNetAppBackupJobDetail.jobStatus
+            $TempVMDetail | Add-Member -MemberType NoteProperty -Name "Last Run Status" -Value $JobStatus[0].Status
+            $TempVMDetail | Add-Member -MemberType NoteProperty -Name "Last Run Start Time" -Value $JobStatus[0].startTime
+            $TempVMDetail | Add-Member -MemberType NoteProperty -Name "Last Run End Time" -Value $JobStatus[0].endTime
+            $TempVMDetail | Add-Member -MemberType NoteProperty -Name "Total Count of Backup Job Logs" -Value $JobStatus.count
+            $TempVMDetail | Add-Member -MemberType NoteProperty -Name "Total Count of Non Successfull Backup Job Logs" -Value ($JobStatus | Where-Object {$_.status -ne "SUCCESS"}).count
+            $TempVMDetail | Add-Member -MemberType NoteProperty -Name "Oldest Successful Backup" -Value (($JobStatus | Where-Object {$_.status -eq "SUCCESS"}) | Sort-Object name | Select-Object -First 1 | Select EndTime).endtime
             $VMSnapMirrorBackupDetail += $TempVMDetail
           }
           Else {
@@ -185,6 +201,12 @@ ForEach($VCenter in $VCenters){
             $TempVMDetail | Add-Member -MemberType NoteProperty -Name "VM_BackupJobDailyScheduleMin" -Value $VMNetAppBackupJobDetail.DailyScheduleMin
             $TempVMDetail | Add-Member -MemberType NoteProperty -Name "VM_BackupJobRetention" -Value $VMNetAppBackupJobDetail.Retention
             $TempVMDetail | Add-Member -MemberType NoteProperty -Name "VM_BackupJobState" -Value $VMNetAppBackupJobDetail.jobStatus
+            $TempVMDetail | Add-Member -MemberType NoteProperty -Name "Last Run Status" -Value $JobStatus[0].Status
+            $TempVMDetail | Add-Member -MemberType NoteProperty -Name "Last Run Start Time" -Value $JobStatus[0].startTime
+            $TempVMDetail | Add-Member -MemberType NoteProperty -Name "Last Run End Time" -Value $JobStatus[0].endTime
+            $TempVMDetail | Add-Member -MemberType NoteProperty -Name "Total Count of Backup Job Logs" -Value $JobStatus.count
+            $TempVMDetail | Add-Member -MemberType NoteProperty -Name "Total Count of Non Successfull Backup Job Logs" -Value ($JobStatus | Where-Object {$_.status -ne "SUCCESS"}).count
+            $TempVMDetail | Add-Member -MemberType NoteProperty -Name "Oldest Successful Backup" -Value (($JobStatus | Where-Object {$_.status -eq "SUCCESS"}) | Sort-Object name | Select-Object -First 1 | Select EndTime).endtime
             $VMBackupDetail += $TempVMDetail       
           }
         #}
@@ -198,12 +220,26 @@ ForEach($VCenter in $VCenters){
     $TempBackupJobName = $TempBackupJob.jobname
     $TempBackupDatastores = $TempBackupJob.entities.entity
     Foreach ($TempBackupDatastore in $TempBackupDatastores) {
-      IF($TempBackupJob.updateMirror -eq $True) {$TempBackupType = "SnapMirror"} Else {$TempBackupType = "Backup"}
+      IF($TempBackupJob.updateMirror -eq $True) {
+        $TempBackupType = "SnapMirror"
+      } 
+      Else {
+        $TempBackupType = "Backup"
+      }
+      $JobStatus = @()
+      $JobStatus = $BackupStatusXML.root.backup | Where-Object {$_.backupJobID -eq $TempBackupJob.JobID} | Sort-Object name -Descending
       $TempBackupJobDatastoreInfo = New-Object psobject
       $TempBackupJobDatastoreInfo | Add-Member -MemberType NoteProperty -Name "JobName" -Value $TempBackupJobName
+      $TempBackupJobDatastoreInfo | Add-Member -MemberType NoteProperty -Name "JobID" -Value $TempBackupJob.JobID
       $TempBackupJobDatastoreInfo | Add-Member -MemberType NoteProperty -Name "Datastore" -Value $TempBackupDatastore.Name
       $TempBackupJobDatastoreInfo | Add-Member -MemberType NoteProperty -Name "UUID" -Value $TempBackupDatastore.uuid
       $TempBackupJobDatastoreInfo | Add-Member -MemberType NoteProperty -Name "BackupType" -Value $TempBackupType
+      $TempBackupJobDatastoreInfo | Add-Member -MemberType NoteProperty -Name "Last Run Status" -Value $JobStatus[0].Status
+      $TempBackupJobDatastoreInfo | Add-Member -MemberType NoteProperty -Name "Last Run Start Time" -Value $JobStatus[0].startTime
+      $TempBackupJobDatastoreInfo | Add-Member -MemberType NoteProperty -Name "Last Run End Time" -Value $JobStatus[0].endTime
+      $TempBackupJobDatastoreInfo | Add-Member -MemberType NoteProperty -Name "Total Count of Backup Job Logs" -Value $JobStatus.count
+      $TempBackupJobDatastoreInfo | Add-Member -MemberType NoteProperty -Name "Total Count of Non Successfull Backup Job Logs" -Value ($JobStatus | Where-Object {$_.status -ne "SUCCESS"}).count
+      $TempBackupJobDatastoreInfo | Add-Member -MemberType NoteProperty -Name "Oldest Successful Backup" -Value (($JobStatus | Where-Object {$_.status -eq "SUCCESS"}) | Sort-Object name | Select-Object -First 1 | Select EndTime).endtime
       $BackupJobDatastoresInfo += $TempBackupJobDatastoreInfo
     }
   }
@@ -216,14 +252,15 @@ ForEach ($VMWareDatastore in $VMWareDatastores){
   ForEach ($TempVMWareDataStoreBackupJob in $TempVMWareDataStoreBackupJobs){
     $TempBackupJobData = $BackupJobDetail | Where-Object ($_.JobName -match $TempVMWareDataStoreBackupJob.JobName)
     $TempVMWareDataStoreBackupJobDetail = New-Object psobject
-    $TempVMWareDataStoreBackupJobDetail | Add-Member -MemberType NoteProperty -Name "VMWare_Datastore_Name" -Value $VMWareDatastore.Name
-    $TempVMWareDataStoreBackupJobDetail | Add-Member -MemberType NoteProperty -Name "VMWare_Datastore_FreeSpaceGB" -Value $VMWareDatastore.FreeSpaceGB
-    $TempVMWareDataStoreBackupJobDetail | Add-Member -MemberType NoteProperty -Name "VMWare_Datastore_CapacityGB" -Value $VMWareDatastore.CapacityGB
-    $TempVMWareDataStoreBackupJobDetail | Add-Member -MemberType NoteProperty -Name "Backup_JobName" -Value $TempVMWareDataStoreBackupJob.JobName
-    $TempVMWareDataStoreBackupJobDetail | Add-Member -MemberType NoteProperty -Name "Backup_UUID" -Value $TempVMWareDataStoreBackupJob.UUID
-    $TempVMWareDataStoreBackupJobDetail | Add-Member -MemberType NoteProperty -Name "BackupType" -Value $TempVMWareDataStoreBackupJob.BackupType
-    $TempVMWareDataStoreBackupJobDetail | Add-Member -MemberType NoteProperty -Name "BackupRetention" -Value $TempBackupJobData.Retention
-    $TempVMWareDataStoreBackupJobDetail | Add-Member -MemberType NoteProperty -Name "Backup_NoSnapshotVMs" -Value $TempBackupJobData.No_SnapshotVMs
+    $TempVMWareDataStoreBackupJobDetail = $TempVMWareDataStoreBackupJob
+    #$TempVMWareDataStoreBackupJobDetail | Add-Member -MemberType NoteProperty -Name "VMWare_Datastore_Name" -Value $VMWareDatastore.Name
+    #$TempVMWareDataStoreBackupJobDetail | Add-Member -MemberType NoteProperty -Name "VMWare_Datastore_FreeSpaceGB" -Value $VMWareDatastore.FreeSpaceGB
+    #$TempVMWareDataStoreBackupJobDetail | Add-Member -MemberType NoteProperty -Name "VMWare_Datastore_CapacityGB" -Value $VMWareDatastore.CapacityGB
+    #$TempVMWareDataStoreBackupJobDetail | Add-Member -MemberType NoteProperty -Name "Backup_JobName" -Value $TempVMWareDataStoreBackupJob.JobName
+    #$TempVMWareDataStoreBackupJobDetail | Add-Member -MemberType NoteProperty -Name "Backup_UUID" -Value $TempVMWareDataStoreBackupJob.UUID
+    #$TempVMWareDataStoreBackupJobDetail | Add-Member -MemberType NoteProperty -Name "BackupType" -Value $TempVMWareDataStoreBackupJob.BackupType
+    #$TempVMWareDataStoreBackupJobDetail | Add-Member -MemberType NoteProperty -Name "BackupRetention" -Value $TempBackupJobData.Retention
+    #$TempVMWareDataStoreBackupJobDetail | Add-Member -MemberType NoteProperty -Name "Backup_NoSnapshotVMs" -Value $TempBackupJobData.No_SnapshotVMs
     $VMWareDataStoreBackupJobsDetail += $TempVMWareDataStoreBackupJobDetail
   }
   IF(!($TempVMWareDataStoreBackupJobs)){
@@ -256,6 +293,17 @@ ForEach ($VMWareDataStoreBackupJobDetail in $VMWareDataStoreBackupJobsDetail){
       }
     }
   }
+}
+#
+# Check Backup Job Status
+#
+ForEach ($BackupJobStatusInfo in $BackupJobDatastoresInfo){
+  $BackupJobRunDetail = @()
+  $BackupJobRunDetail = $BackupStatusXML.root.backup | Where-Object {$_.backupJobID -eq $BackupJobStatusInfo.JobID}
+  $TempBackupJobStatusInfo = New-Object PSObject
+  $TempBackupJobStatusInfo = $BackupJobStatusInfo
+
+
 }
 #
 # Archive the Current Reports
