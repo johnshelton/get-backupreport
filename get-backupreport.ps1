@@ -1,5 +1,5 @@
 # #Requires -RunAsAdministrator
-# Requires -Modules PowershellGet
+#Requires -Modules PowershellGet
 <#
 =======================================================================================
 File Name: get-netapprpt.ps1
